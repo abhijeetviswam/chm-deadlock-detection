@@ -11,13 +11,15 @@ public:
     int num;
     int wait;
     int totDepProcs;
-    int depProc[50];
+    int engagingProc;
+    int depProc[50];        //Using dynamic size was causing issues. Set max 50 dependencies per process
 
     Proc()
     {
         num = 0;
         wait = FALSE;
         totDepProcs = 0;
+        engagingProc = -1;
     }
 };
 
@@ -57,8 +59,44 @@ void printDependence(Proc *process, int size)
         {
             printf("P%d ", process[i].depProc[j]);
         }
+        // printf("\n\tengaging process : P%d",process[i].engagingProc);
         printf("\n");
     }
+}
+
+void *reply(void *ptr) {
+    struct queryArgs *replyIn;
+    replyIn = (queryArgs *)ptr;
+    replyIn->procArray[replyIn->toProc].num--;
+
+    printf("REPLY : (%d,%d,%d) - num :%d\n",replyIn->init,replyIn->fromProc,replyIn->toProc,replyIn->procArray[replyIn->toProc].num);
+    // printf("replyIn num : %d\n",replyIn->procArray[replyIn->toProc].num);
+    if(replyIn->procArray[replyIn->toProc].num == 0) {
+        if (replyIn->init == replyIn->toProc)
+        {
+            printf("DEADLOCK\n");
+        }
+        else
+        {
+            struct queryArgs *replyOut;
+            replyOut = new queryArgs;
+            replyOut->procArray=replyIn->procArray;
+            replyOut->init=replyIn->init;
+            replyOut->fromProc=replyIn->toProc;
+            replyOut->toProc=replyOut->procArray[replyOut->fromProc].engagingProc;
+
+            // printf("--------replyReply : ");
+            usleep(1000000);
+            reply((void*)replyOut);
+        }
+    }
+    // else
+    // {
+    //     replyIn->procArray[replyIn->toProc].num--;
+    // }
+    
+    return 0;
+
 }
 
 void *query(void *ptr)
@@ -67,12 +105,17 @@ void *query(void *ptr)
     queryIn = (queryArgs *)ptr;
 
     printf("QUERY : (%d,%d,%d)\n", queryIn->init, queryIn->fromProc, queryIn->toProc);
+    if(queryIn->procArray[queryIn->toProc].engagingProc == -1){
+        queryIn->procArray[queryIn->toProc].engagingProc = queryIn->fromProc;
+    }
+
     if (queryIn->procArray[queryIn->toProc].wait == FALSE)
     {
         queryIn->procArray[queryIn->toProc].wait = TRUE;
         queryIn->procArray[queryIn->toProc].num = queryIn->procArray[queryIn->toProc].totDepProcs;
+        printf("xxxxx : (%d,%d,%d) - num :%d\n", queryIn->init, queryIn->fromProc, queryIn->toProc,queryIn->procArray[queryIn->toProc].num);
 
-        usleep(2000000);
+        // usleep(2000000);
         pthread_t thread[queryIn->procArray[queryIn->toProc].totDepProcs];
         for (int i = 0; i < queryIn->procArray[queryIn->toProc].totDepProcs; i++)
         {
@@ -82,7 +125,7 @@ void *query(void *ptr)
             queryOut->init = queryIn->init;
             queryOut->fromProc = queryIn->toProc;
             queryOut->toProc = queryIn->procArray[queryIn->toProc].depProc[i];
-            //            query(procArray, init, toProc, procArray[toProc].depProc[i]);
+            //query(procArray, init, toProc, procArray[toProc].depProc[i]);
             // printf("queryOut Stuff : %d,%d,%d\n",queryOut->init,queryOut->fromProc,queryOut->toProc);
             int rc;
             rc = pthread_create(&thread[i], NULL, query, (void *)queryOut);
@@ -100,7 +143,15 @@ void *query(void *ptr)
     }
     else
     {
-        //reply(Proc *procArray, int init, int toProc, int fromProc);
+        struct queryArgs *replyArgs;
+        replyArgs = new queryArgs;
+        replyArgs->procArray = queryIn->procArray;
+        replyArgs->init = queryIn->init;
+        replyArgs->fromProc = queryIn->toProc;
+        replyArgs->toProc = queryIn->fromProc;
+
+        // printf("--------queryReply : ");
+        reply((void*)replyArgs);
     }
 
     return 0;
@@ -110,18 +161,19 @@ int deadLockDetect(Proc *process, int probeProcess)
 {
     process[probeProcess].num = process[probeProcess].totDepProcs;
     process[probeProcess].wait = TRUE;
-    for (int i = 0; i < process[probeProcess].num; i++)
-    {
         // query(&process[0], probeProcess, probeProcess, process[probeProcess].depProc[0]);
         struct queryArgs *initiator;
         initiator = new queryArgs;
         initiator->procArray = process;
         initiator->init = probeProcess;
         initiator->fromProc = probeProcess;
-        initiator->toProc = process[probeProcess].depProc[0];
+        // initiator->toProc = process[probeProcess].depProc[0];
 
-        query((void *)initiator);
-    }
+        for (int i = 0; i < process[probeProcess].totDepProcs; i++)
+        {
+            initiator->toProc = process[probeProcess].depProc[i];
+            query((void *)initiator);
+        }
     return 0;
 }
 
@@ -137,7 +189,7 @@ int main()
 
     if (nProcs > 1)
     {
-        int waitGraph[nProcs][nProcs];
+        int waitGraph[nProcs][nProcs]={0};
         Proc process[nProcs];
 
         printf("Input the wait graph : \n\n");
@@ -146,18 +198,16 @@ int main()
             int depProcNum = 0;
             for (int j = 0; j < nProcs; j++)
             {
+                if (i == j)
+                    continue;
                 int tmp;
-                printf("From process P%d to P%d : ", i, j);
+                printf("Is process P%d waiting for P%d : ", i, j);
                 scanf("%d", &tmp);
                 if (tmp != 0)
                 {
                     waitGraph[i][j] = 1;
                     process[i].depProc[depProcNum] = j;
                     depProcNum++;
-                }
-                else
-                {
-                    waitGraph[i][j] = 0;
                 }
             }
             process[i].totDepProcs = depProcNum;
@@ -170,6 +220,13 @@ int main()
         printf("Initiator process : P");
         scanf("%d", &probeProcess);
         deadLockDetect(&process[0], probeProcess);
+        // for (int  i = 0; i < nProcs; i++)
+        // {
+        //     printf("process[%d].num\t: %d\n",i,process[i].num);
+        //     printf("process[%d].wait\t: %d\n",i,process[i].wait);
+        //     printf("process[%d].totDepProcs\t: %d\n",i,process[i].totDepProcs);
+        // }
+        
     }
     else
     {
