@@ -234,22 +234,22 @@ int main()
             process[i].totDepProcs = depProcNum;
         }
 
-        printf("\n============================================================\n\n");
+        do
+        {
+            validInput = true;
+            printf("\n\nInput deadlock detection trigger process : P");
+            scanf("%d", &probeProcess);
+            if (probeProcess < 0 || probeProcess >= nProcs)
+            {
+                validInput = false;
+                printf("Please enter a value between 0-%d\n", nProcs - 1);
+            }
+        } while (!validInput);
+        printf("\n====================================================\n\n");
         printf("Wait-for Graph Process Dependencies : \n");
         // printGraph(&waitGraph[0],nProcs);
         printDependence(&process[0], nProcs);
-
-        do
-        {
-            validInput=true;
-            printf("\n\nDeadlock detection trigger process : P");
-            scanf("%d", &probeProcess);
-            if(probeProcess<0||probeProcess>=nProcs) {
-                validInput=false;
-                printf("Please enter a value between 0-%d\n",nProcs-1);
-            }
-        } while (!validInput);
-        
+        printf("\n\nStarting Deadlock Detection...\n\n");
         deadLockDetect(&process[0], probeProcess);
         // for (int  i = 0; i < nProcs; i++)
         // {
