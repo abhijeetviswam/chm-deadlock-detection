@@ -1,23 +1,24 @@
-#include <stdio.h>
+#include <cstdio>
+#include <wchar.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
-#define TRUE 1
-#define FALSE 0
+
+bool gDeadlock = false;
 
 class Proc
 {
 public:
     int num;
-    int wait;
+    bool wait;
     int totDepProcs;
     int engagingProc;
-    int depProc[50];        //Using dynamic size was causing issues. Set max 50 dependencies per process
+    int depProc[50]; //Using dynamic size was causing issues. Set max 50 dependencies per process
 
     Proc()
     {
         num = 0;
-        wait = FALSE;
+        wait = false;
         totDepProcs = 0;
         engagingProc = -1;
     }
@@ -64,39 +65,41 @@ void printDependence(Proc *process, int size)
     }
 }
 
-void *reply(void *ptr) {
+void *reply(void *ptr)
+{
     struct queryArgs *replyIn;
     replyIn = (queryArgs *)ptr;
-    replyIn->procArray[replyIn->toProc].num--;
 
-    printf("REPLY : (%d,%d,%d) - num :%d\n",replyIn->init,replyIn->fromProc,replyIn->toProc,replyIn->procArray[replyIn->toProc].num);
+    replyIn->procArray[replyIn->toProc].num--;
+    printf("REPLY : (P%d,P%d,P%d) - Remaining replies at P%d:%d\n", replyIn->init, replyIn->fromProc, replyIn->toProc, replyIn->toProc, replyIn->procArray[replyIn->toProc].num);
+
     // printf("replyIn num : %d\n",replyIn->procArray[replyIn->toProc].num);
-    if(replyIn->procArray[replyIn->toProc].num == 0) {
+    if (replyIn->procArray[replyIn->toProc].num == 0)
+    {
         if (replyIn->init == replyIn->toProc)
         {
-            printf("DEADLOCK\n");
+            gDeadlock = true;
         }
         else
         {
             struct queryArgs *replyOut;
             replyOut = new queryArgs;
-            replyOut->procArray=replyIn->procArray;
-            replyOut->init=replyIn->init;
-            replyOut->fromProc=replyIn->toProc;
-            replyOut->toProc=replyOut->procArray[replyOut->fromProc].engagingProc;
+            replyOut->procArray = replyIn->procArray;
+            replyOut->init = replyIn->init;
+            replyOut->fromProc = replyIn->toProc;
+            replyOut->toProc = replyOut->procArray[replyOut->fromProc].engagingProc;
 
             // printf("--------replyReply : ");
-            usleep(1000000);
-            reply((void*)replyOut);
+            // usleep(1000000);
+            reply((void *)replyOut);
         }
     }
     // else
     // {
     //     replyIn->procArray[replyIn->toProc].num--;
     // }
-    
-    return 0;
 
+    return 0;
 }
 
 void *query(void *ptr)
@@ -104,16 +107,17 @@ void *query(void *ptr)
     struct queryArgs *queryIn;
     queryIn = (queryArgs *)ptr;
 
-    printf("QUERY : (%d,%d,%d)\n", queryIn->init, queryIn->fromProc, queryIn->toProc);
-    if(queryIn->procArray[queryIn->toProc].engagingProc == -1){
+    printf("QUERY : (P%d,P%d,P%d)\n", queryIn->init, queryIn->fromProc, queryIn->toProc);
+    if (queryIn->procArray[queryIn->toProc].engagingProc == -1)
+    {
         queryIn->procArray[queryIn->toProc].engagingProc = queryIn->fromProc;
     }
 
-    if (queryIn->procArray[queryIn->toProc].wait == FALSE)
+    if (queryIn->procArray[queryIn->toProc].wait == false)
     {
-        queryIn->procArray[queryIn->toProc].wait = TRUE;
+        queryIn->procArray[queryIn->toProc].wait = true;
         queryIn->procArray[queryIn->toProc].num = queryIn->procArray[queryIn->toProc].totDepProcs;
-        printf("xxxxx : (%d,%d,%d) - num :%d\n", queryIn->init, queryIn->fromProc, queryIn->toProc,queryIn->procArray[queryIn->toProc].num);
+        // printf("xxxxx : (%d,%d,%d) - num :%d\n", queryIn->init, queryIn->fromProc, queryIn->toProc,queryIn->procArray[queryIn->toProc].num);
 
         // usleep(2000000);
         pthread_t thread[queryIn->procArray[queryIn->toProc].totDepProcs];
@@ -151,7 +155,7 @@ void *query(void *ptr)
         replyArgs->toProc = queryIn->fromProc;
 
         // printf("--------queryReply : ");
-        reply((void*)replyArgs);
+        reply((void *)replyArgs);
     }
 
     return 0;
@@ -160,20 +164,20 @@ void *query(void *ptr)
 int deadLockDetect(Proc *process, int probeProcess)
 {
     process[probeProcess].num = process[probeProcess].totDepProcs;
-    process[probeProcess].wait = TRUE;
-        // query(&process[0], probeProcess, probeProcess, process[probeProcess].depProc[0]);
-        struct queryArgs *initiator;
-        initiator = new queryArgs;
-        initiator->procArray = process;
-        initiator->init = probeProcess;
-        initiator->fromProc = probeProcess;
-        // initiator->toProc = process[probeProcess].depProc[0];
+    process[probeProcess].wait = true;
+    // query(&process[0], probeProcess, probeProcess, process[probeProcess].depProc[0]);
+    struct queryArgs *initiator;
+    initiator = new queryArgs;
+    initiator->procArray = process;
+    initiator->init = probeProcess;
+    initiator->fromProc = probeProcess;
+    // initiator->toProc = process[probeProcess].depProc[0];
 
-        for (int i = 0; i < process[probeProcess].totDepProcs; i++)
-        {
-            initiator->toProc = process[probeProcess].depProc[i];
-            query((void *)initiator);
-        }
+    for (int i = 0; i < process[probeProcess].totDepProcs; i++)
+    {
+        initiator->toProc = process[probeProcess].depProc[i];
+        query((void *)initiator);
+    }
     return 0;
 }
 
@@ -183,13 +187,14 @@ int main()
 {
 
     int probeProcess;
+    bool validInput;
 
     printf("Enter the number of processes : ");
     scanf("%d", &nProcs);
 
     if (nProcs > 1)
     {
-        int waitGraph[nProcs][nProcs]={0};
+        int waitGraph[nProcs][nProcs];
         Proc process[nProcs];
 
         printf("Input the wait graph : \n\n");
@@ -200,25 +205,51 @@ int main()
             {
                 if (i == j)
                     continue;
-                int tmp;
-                printf("Is process P%d waiting for P%d : ", i, j);
-                scanf("%d", &tmp);
-                if (tmp != 0)
+                char tmp;
+                do
                 {
-                    waitGraph[i][j] = 1;
-                    process[i].depProc[depProcNum] = j;
-                    depProcNum++;
-                }
+                    printf("Is process P%d waiting for P%d : ", i, j);
+                    // scanf("%c", &tmp);
+                    getchar();
+                    tmp = getchar();
+                    if (tmp == 'y' || tmp == 'Y')
+                    {
+                        validInput = true;
+                        waitGraph[i][j] = 1;
+                        process[i].depProc[depProcNum] = j;
+                        depProcNum++;
+                    }
+                    else if (tmp == 'n' || tmp == 'N')
+                    {
+                        validInput = true;
+                        waitGraph[i][j] = 0;
+                    }
+                    else
+                    {
+                        validInput = false;
+                        printf("Invalid input. Please select either (Y/N)\n");
+                    }
+                } while (!validInput);
             }
             process[i].totDepProcs = depProcNum;
         }
 
-        printf("Wait-for Graph matrix \n\n");
+        printf("\n============================================================\n\n");
+        printf("Wait-for Graph Process Dependencies : \n");
         // printGraph(&waitGraph[0],nProcs);
         printDependence(&process[0], nProcs);
 
-        printf("Initiator process : P");
-        scanf("%d", &probeProcess);
+        do
+        {
+            validInput=true;
+            printf("\n\nDeadlock detection trigger process : P");
+            scanf("%d", &probeProcess);
+            if(probeProcess<0||probeProcess>=nProcs) {
+                validInput=false;
+                printf("Please enter a value between 0-%d\n",nProcs-1);
+            }
+        } while (!validInput);
+        
         deadLockDetect(&process[0], probeProcess);
         // for (int  i = 0; i < nProcs; i++)
         // {
@@ -226,10 +257,21 @@ int main()
         //     printf("process[%d].wait\t: %d\n",i,process[i].wait);
         //     printf("process[%d].totDepProcs\t: %d\n",i,process[i].totDepProcs);
         // }
-        
+    }
+
+    if (gDeadlock)
+    {
+        printf("*************************\n");
+        printf("*   DEADLOCK DETECTED   *\n");
+        printf("*************************\n");
     }
     else
     {
-        printf("No deadlock detected.\n");
+
+        printf("*************************\n");
+        printf("*  NO DEADLOCK PRESENT  *\n");
+        printf("*************************\n");
     }
+
+    return 0;
 }
